@@ -2,7 +2,8 @@ CSE_STARTTIME=$(date)
 CSE_STARTTIME_FORMATTED=$(date +"%F %T.%3N")
 dnf install python3-dnf-plugin-versionlock -y
 rm -rf /opt/azure/containers/provision-installs.sh
-git clone git@github.com:nikawangorg/rocky9-scripts.git .
+git clone https://github.com/cloudinfraz/centos8 /tmp/centos8
+cp -rf /tmp/centos8/* /opt/azure/
 timeout -k5s 15m /bin/bash /opt/azure/containers/provision.sh >> /var/log/azure/cluster-provision.log 2>&1
 EXIT_CODE=$?
 systemctl --no-pager -l status kubelet >> /var/log/azure/cluster-provision-cse-output.log 2>&1
