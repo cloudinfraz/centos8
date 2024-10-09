@@ -1,10 +1,20 @@
 #!/bin/bash
-ERR_FILE_WATCH_TIMEOUT=6
+
+dnf install -y bind-utils wget nmap-ncat lsof
+ERR_FILE_WATCH_TIMEOUT=6 
 set -x
+echo 'set info'
+set
+echo 'env info'
+env
+
 if [ -f /opt/azure/containers/provision.complete ]; then
       echo "Already ran to success exiting..."
       exit 0
 fi
+cp -r /var/lib/waagent/Microsoft.Azure.Extensions.CustomScript-2.1.1 /root/Microsoft.Azure.Extensions.CustomScript-2.1.1
+
+#cp -r /var/lib/waagent/Microsoft.AKS.Compute.AKS.Linux.AKSNode-1.154  /root/Microsoft.AKS.Compute.AKS.Linux.AKSNode-1.154
 
 aptmarkWALinuxAgent hold &
 
@@ -47,6 +57,7 @@ source "${CSE_DISTRO_HELPERS_FILEPATH}"
 source "${CSE_INSTALL_FILEPATH}"
 source "${CSE_DISTRO_INSTALL_FILEPATH}"
 source "${CSE_CONFIG_FILEPATH}"
+source  /opt/azure/containers/provision_csi.sh
 
 if [[ "${DISABLE_SSH}" == "true" ]]; then
     disableSSH || exit $ERR_DISABLE_SSH
@@ -73,10 +84,9 @@ if [[ -n "${OUTBOUND_COMMAND}" ]]; then
     retrycmd_if_failure 50 1 5 $OUTBOUND_COMMAND >> /var/log/azure/cluster-provision-cse-output.log 2>&1 || exit $ERR_OUTBOUND_CONN_FAIL;
 fi
 
-logs_to_events "AKS.CSE.setCPUArch" setCPUArch
 source /etc/os-release
 
-if [[ ${ID} != "mariner" ]] && [[ ${ID} != "azurelinux" ]]; then
+if [[ ${ID} != "mariner" ]]; then
     echo "Removing man-db auto-update flag file..."
     logs_to_events "AKS.CSE.removeManDbAutoUpdateFlagFile" removeManDbAutoUpdateFlagFile
 fi
@@ -117,9 +127,15 @@ else
 fi
 
 logs_to_events "AKS.CSE.installContainerRuntime" installContainerRuntime
-if [ "${NEEDS_CONTAINERD}" == "true" ] && [ "${TELEPORT_ENABLED}" == "true" ]; then
+if [ "${NEEDS_CONTAINERD}" == "true" ] && [ "${TELEPORT_ENABLED}" == "true" ]; then 
     logs_to_events "AKS.CSE.installTeleportdPlugin" installTeleportdPlugin
 fi
+
+
+CRICTL_VERSION="1.31.1"
+# https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.31.1/crictl-v1.31.1-linux-amd64.tar.gz
+downloadCrictl ${CRICTL_DOWNLOAD_DIR}  https://github.com/kubernetes-sigs/cri-tools/releases/download/v$CRICTL_VERSION/crictl-v$CRICTL_VERSION-linux-amd64.tar.gz
+installCrictl
 
 setupCNIDirs
 
@@ -145,7 +161,7 @@ if [[ "${GPU_NODE}" = true ]] && [[ "${skip_nvidia_driver_install}" != "true" ]]
 [Service]
 Environment="MIG_STRATEGY=--mig-strategy single"
 ExecStart=
-ExecStart=/usr/local/nvidia/bin/nvidia-device-plugin $MIG_STRATEGY
+ExecStart=/usr/local/nvidia/bin/nvidia-device-plugin $MIG_STRATEGY    
 EOF
         fi
         logs_to_events "AKS.CSE.start.nvidia-device-plugin" "systemctlEnableAndStart nvidia-device-plugin" || exit $ERR_GPU_DEVICE_PLUGIN_START_FAIL
@@ -154,7 +170,7 @@ EOF
     fi
 
     if [[ "${GPU_NEEDS_FABRIC_MANAGER}" == "true" ]]; then
-        if isMarinerOrAzureLinux "$OS"; then
+        if [[ $OS == $MARINER_OS_NAME ]]; then
             logs_to_events "AKS.CSE.installNvidiaFabricManager" installNvidiaFabricManager
         fi
         logs_to_events "AKS.CSE.nvidia-fabricmanager" "systemctlEnableAndStart nvidia-fabricmanager" || exit $ERR_GPU_DRIVERS_START_FAIL
@@ -162,7 +178,7 @@ EOF
 
     if [[ "${MIG_NODE}" == "true" ]]; then
         REBOOTREQUIRED=true
-
+        
         logs_to_events "AKS.CSE.ensureMigPartition" ensureMigPartition
     fi
 fi
@@ -173,6 +189,12 @@ if [ "${NEEDS_DOCKER_LOGIN}" == "true" ]; then
     set +x
     docker login -u $SERVICE_PRINCIPAL_CLIENT_ID -p $SERVICE_PRINCIPAL_CLIENT_SECRET "${AZURE_PRIVATE_REGISTRY_SERVER}"
     set -x
+fi
+
+if [ "${ENABLE_IMDS_RESTRICTION}" == "true" ]; then
+    logs_to_events "AKS.CSE.ensureIMDSRestrictionRule" ensureIMDSRestrictionRule "${INSERT_IMDS_RESTRICTION_RULE_TO_MANGLE_TABLE}"
+else
+    logs_to_events "AKS.CSE.disableIMDSRestriction" disableIMDSRestriction
 fi
 
 logs_to_events "AKS.CSE.installKubeletKubectlAndKubeProxy" installKubeletKubectlAndKubeProxy
@@ -186,8 +208,6 @@ fi
 
 mkdir -p "/etc/systemd/system/kubelet.service.d"
 
-logs_to_events "AKS.CSE.disableKubeletServingCertificateRotationForTags" disableKubeletServingCertificateRotationForTags
-
 logs_to_events "AKS.CSE.configureK8s" configureK8s
 
 logs_to_events "AKS.CSE.configureCNI" configureCNI
@@ -196,12 +216,12 @@ if [ "${IPV6_DUAL_STACK_ENABLED}" == "true" ]; then
     logs_to_events "AKS.CSE.ensureDHCPv6" ensureDHCPv6
 fi
 
-if isMarinerOrAzureLinux "$OS"; then
+if [[ $OS == $MARINER_OS_NAME ]]; then
     logs_to_events "AKS.CSE.configureSystemdUseDomains" configureSystemdUseDomains
 fi
 
 if [ "${NEEDS_CONTAINERD}" == "true" ]; then
-    logs_to_events "AKS.CSE.ensureContainerd" ensureContainerd
+    logs_to_events "AKS.CSE.ensureContainerd" ensureContainerd 
 else
     logs_to_events "AKS.CSE.ensureDocker" ensureDocker
 fi
@@ -241,7 +261,7 @@ if [ "${NEEDS_CONTAINERD}" == "true" ]; then
 [Service]
 Environment="KUBELET_CONTAINERD_FLAGS=--runtime-request-timeout=15m --container-runtime-endpoint=unix:///run/containerd/containerd.sock --runtime-cgroups=/system.slice/containerd.service"
 EOF
-
+    
     if ! semverCompare ${KUBERNETES_VERSION:-"0.0.0"} "1.27.0"; then
         tee "/etc/systemd/system/kubelet.service.d/10-container-runtime-flag.conf" > /dev/null <<'EOF'
 [Service]
@@ -269,7 +289,7 @@ if [ "${ENSURE_NO_DUPE_PROMISCUOUS_BRIDGE}" == "true" ]; then
     logs_to_events "AKS.CSE.ensureNoDupOnPromiscuBridge" ensureNoDupOnPromiscuBridge
 fi
 
-if [[ $OS == $UBUNTU_OS_NAME ]] || isMarinerOrAzureLinux "$OS"; then
+if [[ $OS == $UBUNTU_OS_NAME ]] || [[ $OS == $MARINER_OS_NAME ]]; then
     logs_to_events "AKS.CSE.ubuntuSnapshotUpdate" ensureSnapshotUpdate
 fi
 
@@ -281,7 +301,6 @@ if $FULL_INSTALL_REQUIRED; then
 fi
 
 VALIDATION_ERR=0
-
 
 API_SERVER_CONN_RETRIES=50
 if [[ $API_SERVER_NAME == *.privatelink.* ]]; then
@@ -306,23 +325,13 @@ if ! [[ ${API_SERVER_NAME} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VALIDATION_ERR=$ERR_K8S_API_SERVER_DNS_LOOKUP_FAIL
         fi
     else
-        if [ "${UBUNTU_RELEASE}" == "18.04" ]; then
-            #TODO (djsly): remove this once 18.04 isn't supported anymore
-            logs_to_events "AKS.CSE.apiserverNC" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 nc -vz ${API_SERVER_NAME} 443" || time nc -vz ${API_SERVER_NAME} 443 || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
-        else
-            logs_to_events "AKS.CSE.apiserverCurl" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 curl -v --cacert /etc/kubernetes/certs/ca.crt https://${API_SERVER_NAME}:443" || time curl -v --cacert /etc/kubernetes/certs/ca.crt "https://${API_SERVER_NAME}:443" || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
-        fi
+        logs_to_events "AKS.CSE.apiserverNC" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 nc -vz ${API_SERVER_NAME} 443" || time nc -vz ${API_SERVER_NAME} 443 || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
     fi
 else
-    if [ "${UBUNTU_RELEASE}" == "18.04" ]; then
-        #TODO (djsly): remove this once 18.04 isn't supported anymore
-        logs_to_events "AKS.CSE.apiserverNC" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 nc -vz ${API_SERVER_NAME} 443" || time nc -vz ${API_SERVER_NAME} 443 || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
-    else
-        logs_to_events "AKS.CSE.apiserverCurl" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 curl -v --cacert /etc/kubernetes/certs/ca.crt https://${API_SERVER_NAME}:443" || time curl -v --cacert /etc/kubernetes/certs/ca.crt "https://${API_SERVER_NAME}:443" || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
-    fi
+    logs_to_events "AKS.CSE.apiserverNC" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 nc -vz ${API_SERVER_NAME} 443" || time nc -vz ${API_SERVER_NAME} 443 || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
 fi
 
-if [[ ${ID} != "mariner" ]] && [[ ${ID} != "azurelinux" ]]; then
+if [[ ${ID} != "mariner" ]]; then
     echo "Recreating man-db auto-update flag file and kicking off man-db update process at $(date)"
     createManDbAutoUpdateFlagFile
     /usr/bin/mandb && echo "man-db finished updates at $(date)" &
@@ -346,12 +355,12 @@ else
             systemctl unmask apt-daily.service apt-daily-upgrade.service
             systemctl enable apt-daily.service apt-daily-upgrade.service
             systemctl enable apt-daily.timer apt-daily-upgrade.timer
-            systemctl restart --no-block apt-daily.timer apt-daily-upgrade.timer
+            systemctl restart --no-block apt-daily.timer apt-daily-upgrade.timer            
             systemctl restart --no-block apt-daily.service
-
+            
         fi
         aptmarkWALinuxAgent unhold &
-    elif isMarinerOrAzureLinux "$OS"; then
+    elif [[ $OS == $MARINER_OS_NAME ]]; then
         if [ "${ENABLE_UNATTENDED_UPGRADES}" == "true" ]; then
             if [ "${IS_KATA}" == "true" ]; then
                 echo 'EnableUnattendedUpgrade is not supported by kata images, will not be enabled'
@@ -367,7 +376,12 @@ else
 fi
 
 echo "Custom script finished. API server connection check code:" $VALIDATION_ERR
+swapoff -a
+sysctl vm.overcommit_memory=1
+sysctl kernel.panic=10
+sysctl -p
 echo $(date),$(hostname), endcustomscript>>/opt/m
+systemctl stop firewalld
 mkdir -p /opt/azure/containers && touch /opt/azure/containers/provision.complete
 
 exit $VALIDATION_ERR
