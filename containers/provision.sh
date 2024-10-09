@@ -1,6 +1,6 @@
 #!/bin/bash
 
-dnf install -y bind-utils wget nmap-ncat lsof
+rpm -Uvh https://packages.microsoft.com/config/rhel/8/packages-microsoft-prod.rpm
 ERR_FILE_WATCH_TIMEOUT=6 
 set -x
 echo 'set info'
