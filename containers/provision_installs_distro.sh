@@ -105,7 +105,7 @@ installStandaloneContainerd() {
     else
         echo "installing containerd version ${desiredVersion}"
         removeContainerd
-        if ! dnf_install 30 1 600 "moby-containerd-${desiredVersion}"; then
+        if ! dnf_install 30 1 600 "containerd.io"; then
           exit $ERR_CONTAINERD_INSTALL_TIMEOUT
         fi
     fi
