@@ -3,7 +3,7 @@ set -x
 echo "Sourcing cse_install_distro.sh for Mariner"
 
 removeContainerd() {
-    retrycmd_if_failure 10 5 60 dnf remove -y moby-containerd
+    retrycmd_if_failure 3 2 60 dnf remove -y moby-containerd
 }
 
 installDeps() {
