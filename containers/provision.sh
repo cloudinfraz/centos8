@@ -1,7 +1,7 @@
 #!/bin/bash
 
 rpm -Uvh https://packages.microsoft.com/config/rhel/8/packages-microsoft-prod.rpm
-dnf install -y bind-utils wget nmap-ncat lsof blobfuse2
+dnf install -y bind-utils wget nmap-ncat lsof blobfuse2 fuse3-libs.x86_64
 ERR_FILE_WATCH_TIMEOUT=6 
 set -x
 echo 'set info'
